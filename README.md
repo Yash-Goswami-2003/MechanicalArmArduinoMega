@@ -146,3 +146,121 @@ void setup() {
     Serial.println("- servo_number,angle");
     Serial.println("- autoMove (for automated sequence)");
 }
+
+void loop() {
+    // Check for serial commands
+    if (Serial.available() > 0) {
+        String input = Serial.readStringUntil('\n');
+        if (input == "autoMove") {
+            startAutoMove();
+        } else {
+            parseCommand(input);
+        }
+    }
+    
+    // Update servo positions
+    unsigned long currentTime = millis();
+    updateServos(currentTime);
+    
+    // Handle auto movement sequence
+    if (autoMoveActive) {
+        updateAutoMove(currentTime);
+    }
+}
+
+void startAutoMove() {
+    autoMoveActive = true;
+    currentStep = 0;
+    stepStartTime = millis();
+    Serial.println("Starting automated sequence");
+    
+    // Set first movement
+    int servoIndex = autoSequence[currentStep].servo - 1;
+    servos[servoIndex].targetAngle = autoSequence[currentStep].angle;
+}
+
+void updateAutoMove(unsigned long currentTime) {
+    // Check if all servos have reached their target positions
+    bool allServosDone = true;
+    for (int i = 0; i < 4; i++) {
+        if (servos[i].currentAngle != servos[i].targetAngle) {
+            allServosDone = false;
+            break;
+        }
+    }
+    
+    // If current movement is complete and delay time has passed
+    if (allServosDone && (currentTime - stepStartTime >= STEP_DELAY)) {
+        currentStep++;
+        
+        // Check if sequence is complete
+        if (currentStep >= SEQUENCE_LENGTH) {
+            autoMoveActive = false;
+            Serial.println("Automated sequence complete");
+            return;
+        }
+        
+        // Start next movement
+        int servoIndex = autoSequence[currentStep].servo - 1;
+        servos[servoIndex].targetAngle = autoSequence[currentStep].angle;
+        stepStartTime = currentTime;
+        
+        Serial.print("Step ");
+        Serial.print(currentStep);
+        Serial.print(": Moving servo ");
+        Serial.print(autoSequence[currentStep].servo);
+        Serial.print(" to ");
+        Serial.println(autoSequence[currentStep].angle);
+    }
+}
+
+void parseCommand(String command) {
+    int commaIndex = command.indexOf(',');
+    if (commaIndex == -1) {
+        Serial.println("Invalid command! Use format: servo_number,angle");
+        return;
+    }
+    
+    // Extract servo number and target angle
+    int servoNum = command.substring(0, commaIndex).toInt() - 1;
+    int angle = command.substring(commaIndex + 1).toInt();
+    
+    // Validate servo number
+    if (servoNum < 0 || servoNum > 3) {
+        Serial.println("Invalid servo number! Use 1-4");
+        return;
+    }
+    
+    // Constrain angle to valid range
+    angle = constrain(angle, servoLimits[servoNum].min, servoLimits[servoNum].max);
+    
+    // Set new target angle
+    servos[servoNum].targetAngle = angle;
+    
+    Serial.print("Moving servo ");
+    Serial.print(servoNum + 1);
+    Serial.print(" to ");
+    Serial.println(angle);
+}
+
+void updateServos(unsigned long currentTime) {
+    Servo* servoArray[] = {&servo1, &servo2, &servo3, &servo4};
+    
+    for (int i = 0; i < 4; i++) {
+        if (currentTime - servos[i].lastMoveTime >= MOVE_INTERVAL) {
+            if (servos[i].currentAngle != servos[i].targetAngle) {
+                // Determine direction and move one step
+                if (servos[i].currentAngle < servos[i].targetAngle) {
+                    servos[i].currentAngle = min(servos[i].currentAngle + ANGLE_STEP, 
+                                               servos[i].targetAngle);
+                } else {
+                    servos[i].currentAngle = max(servos[i].currentAngle - ANGLE_STEP, 
+                                               servos[i].targetAngle);
+                }
+                
+                servoArray[i]->write(servos[i].currentAngle);
+                servos[i].lastMoveTime = currentTime;
+            }
+        }
+    }
+}
